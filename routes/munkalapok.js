@@ -131,4 +131,188 @@ router.get('/:id', async(req,res)=>{
 
 })
 
+
+router.patch('/:id/statusz', async (req, res) => {
+    const { id } = req.params
+    const { statusz } = req.body
+
+    const [munkalap] = await pool.query(
+        'SELECT * FROM munkalapok WHERE id = ?',
+        [id]
+    )
+
+    if (munkalap.length === 0) {
+        return res.status(404).json({
+            error: 'A munkalap nem található'
+        })
+    }
+
+    const statuszok = [
+        'felvéve',
+        'javítás alatt',
+        'kész',
+        'átadva'
+    ]
+
+    if (!statuszok.includes(statusz)) {
+        return res.status(400).json({
+            error: 'Érvénytelen státusz'
+        })
+    }
+    const jelenlegi = statuszok.indexOf(munkalap[0].statusz)
+    const uj = statuszok.indexOf(statusz)
+
+    if (uj !== jelenlegi + 1) {
+        return res.status(409).json({
+            error: 'Csak a következő státusz engedélyezett'
+        })
+    }
+
+    await pool.query(
+        'UPDATE munkalapok SET statusz = ? WHERE id = ?',
+        [statusz, id]
+    )
+
+    const [eredmeny] = await pool.query(
+        'SELECT * FROM munkalapok WHERE id = ?',
+        [id]
+    )
+
+    res.status(200).json(eredmeny[0])
+})
+
+//feladat megoldásához AI segítségét használtam
+router.post('/:id/alkatreszek', async (req, res) => {
+    const { id } = req.params
+    const { alkatreszId, db } = req.body ?? {}
+
+    if (!Number.isInteger(Number(db)) || Number(db) < 1) {
+    return res.status(400).json({
+        error: 'A darabszámnak pozitív egész számnak kell lennie'
+        })
+    }
+
+    if (!Number.isInteger(Number(id)) || Number(id) < 1 ||
+        !Number.isInteger(Number(alkatreszId)) || Number(alkatreszId) < 1 ||
+        !Number.isInteger(Number(db)) || Number(db) < 1) {
+        return res.status(400).json({
+            error: 'Hibás adatok'
+        })
+    }
+
+    const conn = await pool.getConnection()
+
+    try {
+        await conn.beginTransaction()
+
+        const [munkalap] = await conn.query(
+            'SELECT * FROM munkalapok WHERE id = ? FOR UPDATE',
+            [id]
+        )
+
+        if (munkalap.length === 0) {
+            await conn.rollback()
+            return res.status(404).json({
+                error: 'A munkalap nem található'
+            })
+        }
+
+        if (munkalap[0].statusz === 'kész' ||
+            munkalap[0].statusz === 'átadva') {
+            await conn.rollback()
+            return res.status(409).json({
+            error: 'A munkalap már lezárt'
+            })
+        }
+
+        const [alkatresz] = await conn.query(
+            'SELECT * FROM alkatreszek WHERE id = ? FOR UPDATE',
+            [alkatreszId]
+        )
+
+        if (alkatresz.length === 0) {
+            await conn.rollback()
+            return res.status(404).json({
+                error: 'Az alkatrész nem található'
+            })
+        }
+
+        if (alkatresz[0].keszlet < db) {
+            await conn.rollback()
+            return res.status(409).json({
+                error: 'Nincs elegendő alkatrész a készleten'
+            })
+        }
+
+        const [felhasznalas] = await conn.query(`
+            SELECT * FROM felhasznalasok
+            WHERE munkalap_id = ? AND alkatresz_id = ?
+        `, [id, alkatreszId])
+
+        if (felhasznalas.length > 0) {
+            await conn.query(`
+                UPDATE felhasznalasok
+                SET db = db + ?
+                WHERE munkalap_id = ? AND alkatresz_id = ?
+            `, [db, id, alkatreszId])
+        } else {
+            await conn.query(`
+                INSERT INTO felhasznalasok
+                (munkalap_id, alkatresz_id, db)
+                VALUES (?, ?, ?)
+            `, [id, alkatreszId, db])
+        }
+
+        await conn.query(`
+            UPDATE alkatreszek
+            SET keszlet = keszlet - ?
+            WHERE id = ?
+        `, [db, alkatreszId])
+
+        await conn.commit()
+
+        const [m] = await pool.query(`
+            SELECT *
+            FROM munkalapok
+            WHERE id = ?
+        `, [id])
+
+        const [a] = await pool.query(`
+            SELECT
+                a.id AS alkatreszId,
+                a.nev AS alkatresz,
+                a.ar,
+                f.db,
+                (a.ar * f.db) AS reszosszeg
+            FROM felhasznalasok f
+            JOIN alkatreszek a ON f.alkatresz_id = a.id
+            WHERE f.munkalap_id = ?
+        `, [id])
+
+        const munkadij = Number(m[0].munkaora) * 12000
+
+        const alkatreszDij = a.reduce(
+            (osszeg, elem) => osszeg + Number(elem.reszosszeg), 0
+        )
+
+        const vegosszeg = munkadij + alkatreszDij
+
+        res.status(201).json({
+            ...m[0],
+            alkatreszek: a,
+            munkadij,
+            alkatreszDij,
+            vegosszeg
+        })
+
+    } catch (error) {
+        await conn.rollback()
+        res.status(500).json({
+            error: 'Szerverhiba'
+        })
+    } finally {
+        conn.release()
+    }
+})
+
 export default router

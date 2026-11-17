@@ -6,7 +6,14 @@ const router = Router();
 
 router.get('/', async(req,res)=>{
     let sql = `
-    SELECT u.id, u.nev, u.telefon, COUNT(m.ugyfel_id) AS munkalapDb, COALESCE(SUM(m.munka_ora*12000), 0) AS osszKoltes
+    SELECT u.id, u.nev, u.telefon, COUNT(DISTINCT m.id) AS munkalapDb, COALESCE(SUM(m.munkaora * 12000), 0) +
+     COALESCE((
+        SELECT SUM(f.db * a.ar)
+        FROM munkalapok m2
+        JOIN felhasznalasok f ON m2.id = f.munkalap_id
+        JOIN alkatreszek a ON f.alkatresz_id = a.id
+        WHERE m2.ugyfel_id = u.id
+    ), 0) AS osszKoltes
     FROM ugyfelek u     
     LEFT JOIN munkalapok m ON u.id = m.ugyfel_id
     GROUP BY u.id, u.nev, u.telefon
