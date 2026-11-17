@@ -52,6 +52,8 @@ router.get('/', async(req,res)=>{
 })
 
 router.get('/:id', async(req,res)=>{
+    //feladat megoldásához használtam AIt
+    
     const {id} = req.params
 
     let sql = `
