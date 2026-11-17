@@ -5,21 +5,23 @@ const router = Router();
 
 
 router.get('/fogyo', async(req,res)=>{
-    const {min} = req.query || 3
+    const {min = 3} = req.query
 
-    let params = []
+    const minErtek = Number(min)
 
+    const params = [Number(min)];
+
+    if (!Number.isInteger(minErtek) || minErtek <= 0) {
+        return res.status(400).json({
+            error: "A minimum csak egész szám lehet"
+        });
+    }
     let sql = `
     SELECT a.id, a.nev, a.ar, a.keszlet
     FROM alkatreszek a
+    WHERE a.keszlet < ?
     ORDER BY a.keszlet ASC
-    LIMIT 3;
 `   
-
-    if(min){
-        sql += ' LIMIT 5'
-        params.push(min)
-    }
 
     const [eredmeny] = await pool.query(sql,params)
 
