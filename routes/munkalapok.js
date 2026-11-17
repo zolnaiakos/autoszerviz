@@ -33,14 +33,13 @@ router.get('/', async(req,res)=>{
 
     if(statusz){
         if(!statuszok.includes(statusz)){
-            return res.status(404).json({
+            return res.status(400).json({
                 error: 'Érvénytelen statusz'
             })
         }
+        sql += params.length ? ' AND m.statusz = ?' : ' WHERE m.statusz = ?';
+        params.push(statusz)
     }
-
-    sql += params.length ? ' AND m.statusz = ?' : ' WHERE m.statusz = ?';
-    params.push(statusz)
     
 
     sql += ' ORDER BY m.felvetel ASC'
@@ -118,7 +117,7 @@ router.get('/:id', async(req,res)=>{
         Number(eredmeny[0].alkatreszDij)
 };
 
-    eredmeny.forEach(alkatreszek=>{
+    eredmeny.filter(f => f.alkatreszId !== null).forEach(alkatreszek=>{
         munkalapok.alkatreszek.push({
             id : alkatreszek.alkatreszId,
             nev: alkatreszek.alkatreszNev,
